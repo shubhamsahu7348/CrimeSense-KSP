@@ -1,0 +1,6 @@
+{
+  "name": "CrimeSense AI",
+  "description": "Karnataka State Police Datathon 2026 - AI Crime Records Intelligence & FIR Analysis Assistant",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
