@@ -81,22 +81,33 @@ export const AIChatView: React.FC<AIChatViewProps> = ({
         content: m.content,
       }));
 
-      const res = await fetch('/api/investigate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: textToSend,
-          history: historyPayload,
-        }),
-      });
+      let rawText = '';
 
-      const data = await res.json();
+      try {
+        const res = await fetch('/api/investigate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: textToSend,
+            history: historyPayload,
+          }),
+        });
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to communicate with AI Engine');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.text) {
+            rawText = data.text;
+          }
+        }
+      } catch (networkErr) {
+        console.warn('Backend API endpoint unreachable, falling back to client search engine:', networkErr);
       }
 
-      const rawText = data.text || 'No response returned.';
+      // If backend was unreachable or returned empty/error text, synthesize answer using local search engine
+      if (!rawText) {
+        rawText = generateLocalCrimeAnalysis(textToSend, allFIRs, INITIAL_REPEAT_OFFENDERS, INITIAL_POLICE_STATIONS);
+      }
+
       const parsed = parseAIResponse(rawText);
 
       const assistantMsg: ChatMessage = {
@@ -109,7 +120,7 @@ export const AIChatView: React.FC<AIChatViewProps> = ({
 
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err: any) {
-      console.warn('Backend API request failed, executing client-side database search engine fallback:', err);
+      console.warn('Fallback processing exception:', err);
       const fallbackText = generateLocalCrimeAnalysis(textToSend, allFIRs, INITIAL_REPEAT_OFFENDERS, INITIAL_POLICE_STATIONS);
       const parsedFallback = parseAIResponse(fallbackText);
 
