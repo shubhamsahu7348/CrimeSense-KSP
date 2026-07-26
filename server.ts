@@ -10,6 +10,7 @@ import {
   getSystemAnalyticsFromRecords 
 } from './src/data/mockCrimeData';
 import { FIRRecord, RepeatOffender } from './src/types';
+import { generateLocalCrimeAnalysis } from './src/utils/localSearchEngine';
 
 dotenv.config();
 
@@ -76,16 +77,13 @@ async function startServer() {
   const app = express();
   app.use(express.json());
 
-  const PORT = 3000;
+  // Support dynamic PORT assigned by hosting providers like Zoho Catalyst
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   // Initialize Gemini AI Client
-  const getGenAIClient = () => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.warn("GEMINI_API_KEY is missing from environment variables.");
-    }
+  const getGenAIClient = (apiKey: string) => {
     return new GoogleGenAI({
-      apiKey: apiKey || '',
+      apiKey: apiKey,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
@@ -203,11 +201,16 @@ async function startServer() {
       }
 
       const apiKey = process.env.GEMINI_API_KEY;
+
+      // If no GEMINI_API_KEY is configured (e.g. deployed to Zoho Catalyst without env var),
+      // fall back gracefully to local database search synthesis engine.
       if (!apiKey) {
-        return res.status(500).json({ error: 'GEMINI_API_KEY is not configured in server environment.' });
+        console.warn('GEMINI_API_KEY not found in environment. Using local database intelligence fallback.');
+        const fallbackResponse = generateLocalCrimeAnalysis(query, firDatabase, repeatOffendersStore, INITIAL_POLICE_STATIONS);
+        return res.json({ text: fallbackResponse });
       }
 
-      const ai = getGenAIClient();
+      const ai = getGenAIClient(apiKey);
       const dbContext = formatDatabaseContext();
 
       const systemInstruction = `
@@ -273,21 +276,41 @@ ${dbContext}
         parts: [{ text: query }]
       });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: formattedContents,
-        config: {
-          systemInstruction,
-          temperature: 0.1, // Low temperature for high factual precision
-        },
-      });
+      // Try candidate models in order of availability
+      const candidateModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-3.6-flash'];
+      let outputText: string | null = null;
+      let lastError: any = null;
 
-      const outputText = response.text || 'No response generated.';
+      for (const modelName of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: formattedContents,
+            config: {
+              systemInstruction,
+              temperature: 0.1,
+            },
+          });
+          if (response.text) {
+            outputText = response.text;
+            break;
+          }
+        } catch (modelErr) {
+          lastError = modelErr;
+          console.warn(`Model ${modelName} failed, trying next candidate...`, modelErr);
+        }
+      }
+
+      if (!outputText) {
+        console.warn('All Gemini models failed. Falling back to local intelligence search engine.', lastError);
+        outputText = generateLocalCrimeAnalysis(query, firDatabase, repeatOffendersStore, INITIAL_POLICE_STATIONS);
+      }
 
       res.json({ text: outputText });
     } catch (err: any) {
-      console.error('Error in /api/investigate:', err);
-      res.status(500).json({ error: err.message || 'Failed to process AI investigation request' });
+      console.error('Error in /api/investigate, falling back to local analysis:', err);
+      const fallbackText = generateLocalCrimeAnalysis(req.body?.query || '', firDatabase, repeatOffendersStore, INITIAL_POLICE_STATIONS);
+      res.json({ text: fallbackText });
     }
   });
 

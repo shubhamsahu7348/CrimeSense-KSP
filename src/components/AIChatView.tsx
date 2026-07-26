@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { ChatMessage, FIRRecord } from '../types';
 import { parseAIResponse } from '../utils/parser';
+import { generateLocalCrimeAnalysis } from '../utils/localSearchEngine';
+import { INITIAL_REPEAT_OFFENDERS, INITIAL_POLICE_STATIONS } from '../data/mockCrimeData';
 
 interface AIChatViewProps {
   messages: ChatMessage[];
@@ -107,20 +109,18 @@ export const AIChatView: React.FC<AIChatViewProps> = ({
 
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err: any) {
-      console.error('Error executing query:', err);
-      const errorMsg: ChatMessage = {
+      console.warn('Backend API request failed, executing client-side database search engine fallback:', err);
+      const fallbackText = generateLocalCrimeAnalysis(textToSend, allFIRs, INITIAL_REPEAT_OFFENDERS, INITIAL_POLICE_STATIONS);
+      const parsedFallback = parseAIResponse(fallbackText);
+
+      const assistantMsg: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         role: 'assistant',
-        content: `Summary:\nError executing database search query: ${err.message || 'Server error'}.\n\nEvidence:\n- FIR Number: N/A\n- Crime Type: N/A\n- Police Station: N/A\n- Case Status: N/A\n\nInsights:\nPlease verify connection and try again.\n\nConfidence:\nLow`,
+        content: fallbackText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        parsedResponse: {
-          summary: `Error processing query: ${err.message || 'System error'}.`,
-          evidence: [{ firNumber: 'N/A', crimeType: 'N/A', policeStation: 'N/A', caseStatus: 'N/A' }],
-          insights: 'Check server connection or API key credentials.',
-          confidence: 'Low',
-        },
+        parsedResponse: parsedFallback,
       };
-      setMessages((prev) => [...prev, errorMsg]);
+      setMessages((prev) => [...prev, assistantMsg]);
     } finally {
       setLoading(false);
     }
